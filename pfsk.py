@@ -2,7 +2,7 @@ import bitarray
 import numpy as np
 import util
 
-FRAMELENGTH = 0.25
+FRAMELENGTH = 1.0
 TONESPACING = 4
 SAMPLERATE  = 44100.0
 CHUNK_LENGTH = int(SAMPLERATE * FRAMELENGTH)
@@ -11,7 +11,7 @@ MAXIMUM_PHASE = util.TAU
 EXPECTED = bitarray.bitarray('01001011010100100011000101001100010011000101001000100000010000110100111000111000001101010010000000101101001100010011000000110000')
 
 class Modem:
-    def __init__(self, carrier=1000, channelcount=2, tonecount=2, phasecount=2):
+    def __init__(self, carrier=1000, channelcount=4, tonecount=4, phasecount=4):
         self.carrier = carrier
         self.channelcount = channelcount
         self.tonecount = tonecount
