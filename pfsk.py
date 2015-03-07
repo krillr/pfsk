@@ -11,7 +11,7 @@ MAXIMUM_PHASE = util.TAU
 EXPECTED = bitarray.bitarray('01001011010100100011000101001100010011000101001000100000010000110100111000111000001101010010000000101101001100010011000000110000')
 
 class Modem:
-    def __init__(self, carrier=500, channelcount=4, tonecount=4, phasecount=4):
+    def __init__(self, carrier=1000, channelcount=2, tonecount=2, phasecount=2):
         self.carrier = carrier
         self.channelcount = channelcount
         self.tonecount = tonecount
@@ -88,12 +88,10 @@ class Modem:
 
             channels = list(sorted(self.channels))
             framesignal = None#util.note(self.carrier, 0, FRAMELENGTH, samplerate=SAMPLERATE) # carrier
-            frame = []
             for y in range(0, len(framebits), self.channelbitwidth):
                 channelbits = tuple(framebits[y:y+self.channelbitwidth])
                 channel = channels.pop(0)
                 symbol  = self.bin2symbols[channel][channelbits]
-                frame.append(symbol)
 
                 waveform = util.note(symbol[0], symbol[1], FRAMELENGTH, samplerate=SAMPLERATE)
                 if framesignal == None:
@@ -145,16 +143,13 @@ class Modem:
                     possibilities.sort(key=lambda x:x[1])
                     tone = possibilities[0][0]
 
-                #if bitarray.bitarray(symbols2bin[(tone, angle)]) != expected:
-                #  print chunkanalysis.find_peaks_with_angles(*channel), tone, angle, bin2symbols[channel][tuple(expected)]
-                #  print angles
                 bits += symbols2bin[(tone, angle)]
                 c += 1
         return bytearray(bits.tobytes())
 
 if __name__ == '__main__':
     from scipy.io import wavfile
-    import reedsolo, sys
+    import reedsolo, sys, scipy.stats
     
     input = "KR1LLR CN85 -100"
     rs = reedsolo.RSCodec(len(input))
@@ -173,6 +168,7 @@ if __name__ == '__main__':
     elif sys.argv[1] == 'decode':
         _, signal = wavfile.read(sys.argv[2])
         print rs.decode(modem.decode(signal))
+        #print modem.decode(signal)
 
 # vim: ai ts=4 sts=4 et sw=4 ft=python
-# # # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=python
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=python
