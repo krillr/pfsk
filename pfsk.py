@@ -4,13 +4,14 @@ import util
 
 FRAMELENGTH = 0.25
 TONESPACING = 4
-SAMPLERATE  = 44100
+SAMPLERATE  = 44100.0
 CHUNK_LENGTH = int(SAMPLERATE * FRAMELENGTH)
 MINIMUM_PHASE = 0
 MAXIMUM_PHASE = util.TAU
+EXPECTED = bitarray.bitarray('01001011010100100011000101001100010011000101001000100000010000110100111000111000001101010010000000101101001100010011000000110000')
 
 class Modem:
-    def __init__(self, carrier=500, channelcount=2, tonecount=2, phasecount=2):
+    def __init__(self, carrier=500, channelcount=4, tonecount=4, phasecount=4):
         self.carrier = carrier
         self.channelcount = channelcount
         self.tonecount = tonecount
@@ -21,6 +22,8 @@ class Modem:
         self.channelwidth = tonecount * TONESPACING
         self.channelbitwidth = util.getPower(tonecount * phasecount)
         self.bitrate = channelcount * self.channelbitwidth
+
+        self.bandwidth = (channelcount+1) * tonecount * TONESPACING + TONESPACING
 
         # magic to create a list of all the possible symbol values
         self.symbolvalues = [
@@ -84,7 +87,7 @@ class Modem:
             framebits += [0] * (self.bitrate-len(framebits))
 
             channels = list(sorted(self.channels))
-            framesignal = util.note(self.carrier, 0, FRAMELENGTH, samplerate=SAMPLERATE) # carrier
+            framesignal = None#util.note(self.carrier, 0, FRAMELENGTH, samplerate=SAMPLERATE) # carrier
             frame = []
             for y in range(0, len(framebits), self.channelbitwidth):
                 channelbits = tuple(framebits[y:y+self.channelbitwidth])
@@ -92,57 +95,84 @@ class Modem:
                 symbol  = self.bin2symbols[channel][channelbits]
                 frame.append(symbol)
 
-                framesignal += util.note(symbol[0], symbol[1], FRAMELENGTH, samplerate=SAMPLERATE)
+                waveform = util.note(symbol[0], symbol[1], FRAMELENGTH, samplerate=SAMPLERATE)
+                if framesignal == None:
+                    framesignal = waveform
+                else:
+                    framesignal += waveform
 
             signal = np.append(signal, framesignal)
-
+        signal += util.note(self.carrier, 0, len(signal)/SAMPLERATE)
         return signal
 
     def decode(self, signal):
         signalanalysis = util.SignalAnalyzer(signal, SAMPLERATE)
         signalcarrier = signalanalysis.find_peak()
         bits = bitarray.bitarray()
-
+        c = 0
         for x in range(0, len(signal), CHUNK_LENGTH):
             chunk = signal[x:x+CHUNK_LENGTH]
             chunkanalysis = util.SignalAnalyzer(chunk, SAMPLERATE)
             chunkcarrier = chunkanalysis.find_peak(signalcarrier - TONESPACING/2,
                                                   signalcarrier + TONESPACING/2)
+            if not chunkcarrier: continue
             chunkphase = chunkanalysis.get_phase(chunkcarrier)
 
             channels, symbols2bin, bin2symbols = self.mkchannels(int(chunkcarrier), chunkphase)
-            tones = [x[0] for x in symbols2bin]
+            tones = set([x[0] for x in symbols2bin])
             angles = set([x[1] for x in symbols2bin])
-            frame = []
             for channel in sorted(channels):
-                tone, angle = chunkanalysis.find_peak_with_angle(*channel)
+                expected = EXPECTED[c*self.channelbitwidth:c*self.channelbitwidth+self.channelbitwidth]
+                expected += [0]*(self.channelbitwidth - len(expected))
+                peaks = chunkanalysis.find_peaks_with_angles(*channel)
+                scores = []
+                for peak in peaks:
+                    score = peak[1]
+                    angledeltas = [[x, abs(x-peak[2])] for x in angles]
+                    for i in range(len(angledeltas)):
+                        if angledeltas[i][1] > util.TAU/2:
+                            angledeltas[i][1] = abs(angledeltas[i][1] - 6.28)
+                    angledeltas.sort(key=lambda x:x[1])
+                    score += (util.TAU - angledeltas[0][1])/util.TAU
+                    score /= 2
+                    scores.append((peak[0], score, angledeltas[0][0]))
+                scores.sort()
+                tone = scores[0][0]
+                angle = scores[0][2]
+
                 if not tone in tones:
-                    possibilities = [(x, abs(tone-x)) for x in tones]
+                    possibilities = [(x, abs(x-tone)) for x in tones]
                     possibilities.sort(key=lambda x:x[1])
                     tone = possibilities[0][0]
-                if not angle in angles:
-                    possibilities = [[x, abs(angle-x)] for x in angles]
-                    possibilities.sort(key=lambda x:x[1])
-                    for possibility in possibilities:
-                        if possibility[1] > util.TAU/2:
-                            possibility[1] = abs(possibility[1] - 6.28)
-                    angle = possibilities[0][0]
-                frame.append((tone, angle))
+
+                #if bitarray.bitarray(symbols2bin[(tone, angle)]) != expected:
+                #  print chunkanalysis.find_peaks_with_angles(*channel), tone, angle, bin2symbols[channel][tuple(expected)]
+                #  print angles
                 bits += symbols2bin[(tone, angle)]
-        return bits.tobytes()
+                c += 1
+        return bytearray(bits.tobytes())
 
 if __name__ == '__main__':
     from scipy.io import wavfile
-    import sys
+    import reedsolo, sys
     
+    input = "KR1LLR CN85 -100"
+    rs = reedsolo.RSCodec(len(input))
+
     modem = Modem()
 
+    print "Bandwidth:", modem.bandwidth, "hz"
+    print "Bitrate:", modem.bitrate / FRAMELENGTH, "bit/sec"
+    print "Efficiency:", float(modem.bitrate) / modem.bandwidth, "bit/hz"
+    print "Channel Bitwidth:", modem.channelbitwidth
+
     if sys.argv[1] == 'encode':
-        signal = modem.encode("KR1LLR CN85 -100")
+        input = rs.encode(input)
+        signal = modem.encode(input)
         wavfile.write(sys.argv[2], SAMPLERATE,  signal.astype(np.float32))
     elif sys.argv[1] == 'decode':
         _, signal = wavfile.read(sys.argv[2])
-        print modem.decode(signal)
+        print rs.decode(modem.decode(signal))
 
 # vim: ai ts=4 sts=4 et sw=4 ft=python
 # # # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=python

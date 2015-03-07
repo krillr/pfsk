@@ -16,8 +16,7 @@ def note(freq, phase=0, length=0.25, samplerate=44100):
 
 def envelope (samples, channels):
     '''Add an envelope to np array samples to prevent clicking.'''    
-    
-    attack = 800
+    attack = 200
     if len(samples) < 3 * attack:
         attack = int(len(samples) * 0.05)
     line1 = np.linspace (0, 1, attack * channels)
@@ -36,26 +35,35 @@ class SignalAnalyzer:
         self.fft = None
         self.amplitudes = None
         self.freqs = None
-    def preprocess(self):
+        self.processed = False
+    def process(self):
         self.fft    = np.fft.fft(self.signal)
         self.amps   = np.abs(self.fft)
         self.amps  /= self.amps.max()
         self.freqs  = np.around(np.fft.fftfreq(len(self.fft), 1.0/(self.samplerate)))
         self.angles = np.angle(self.fft) % TAU
         self.angle_lookup = dict(zip(self.freqs, self.angles))
+        self.processed  = True
     def find_peak(self, minfreq=250, maxfreq=2500):
         peaks = self.find_peaks(minfreq, maxfreq)
         if not peaks: return
         peak  = max(peaks, key=lambda x: x[1])
         return peak[0]
     def find_peaks(self, minfreq=250, maxfreq=2500):
-        if self.fft == None: self.preprocess()
+        if not self.processed: self.process()
         y = np.indices(self.freqs.shape)
         locs = y[:, (self.freqs >= minfreq) & (self.freqs <= maxfreq)]
         freqs = self.freqs[locs][0]
         amps = self.amps[locs][0]
-        return zip(freqs, amps)
-    def find_peak_with_angle(self, minfreq=250, maxfreq=250):
+        amps /= amps.max()
+        peaks = zip(freqs, amps)
+        peaks = filter(lambda x: x[1]>0.95, peaks)
+        return peaks
+    def find_peaks_with_angles(self, minfreq=250, maxfreq=2500):
+        peaks = [(x, y, self.get_phase(x)) for x, y in self.find_peaks(minfreq, maxfreq)]
+        return peaks
+
+    def find_peak_with_angle(self, minfreq=250, maxfreq=2500):
         peak = self.find_peak(minfreq, maxfreq)
         return peak, self.get_phase(peak)
     def get_phase(self, frequency):
