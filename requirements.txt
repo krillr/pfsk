@@ -1,0 +1,6 @@
+colorama
+numpy
+scipy
+reedsolo
+bitarray
+pyaudio
