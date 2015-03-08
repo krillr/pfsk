@@ -1,8 +1,10 @@
 from colorama import init, Fore, Back, Style
 from scipy.io import wavfile
-import audio, argparse, json, ntplib, numpy as np, os, pfsk, select, sys, time, util, warnings
+import audio, argparse, json, ntplib, numpy as np, os, pfsk, reedsolo, select, sys, time, util, warnings
 
 warnings.simplefilter('ignore')
+
+TX_LENGTH = 16
 
 class Schmetterling:
     options = argparse.ArgumentParser()
@@ -11,6 +13,7 @@ class Schmetterling:
     options.add_argument('--playback-device', type=int)
     options.add_argument('--encode-wav', action='store_true', default=False)
     options.add_argument('--decode-wav', action='store_true', default=False)
+    options.add_argument('--fec', action='store_true', default=False)
     options.add_argument('--file')
     options.add_argument('--msg')
 
@@ -21,6 +24,8 @@ class Schmetterling:
         self.ntpclient = ntplib.NTPClient()
         self.timeoffset = self.ntpclient.request('time.nist.gov', version=3).offset
         self.tx_msg = ''
+        self.tx_length = int((TX_LENGTH * (self.pfsk.bitrate/pfsk.FRAMELENGTH))/16)
+        self.rs = reedsolo.RSCodec(self.tx_length)
 
     def time(self):
         return time.time() + self.timeoffset
@@ -43,7 +48,6 @@ class Schmetterling:
         missing = [x for x, y in self.options.items() if y == None]
         for x in missing:
             self.options[x] = self.interactive_config(x)
-            print self.options[x]
             print Style.RESET_ALL + '\n'
         self.audio.set_playback_device(self.options['playback_device'])
         self.audio.set_recording_device(self.options['recording_device'])
@@ -74,7 +78,6 @@ class Schmetterling:
             else:
                 self.do_rx()
             typ, til = self.next_cycle()
-            print typ, til
             print (Style.BRIGHT + "Sleeping until the prophecy is fulfilled (%.2fs)" + Style.RESET_ALL) % til
             time.sleep(til)
 
@@ -89,40 +92,46 @@ class Schmetterling:
         
     def do_rx(self):
         print (Style.BRIGHT + Fore.BLUE + "Receiving" + Style.RESET_ALL)
-        signal = self.audio.record(10)
+        signal = self.audio.record(TX_LENGTH)
         wavfile.write('lol.wav', 44100, signal)
         print (Style.BRIGHT + Fore.BLUE + "Decoding" + Style.RESET_ALL)
         msg = self.pfsk.decode(signal)
+        try:
+            msg = self.rs.decode(msg)
+        except:
+            msg = Fore.RED + "UNRELIABLE DECODE: " + msg
         if not msg:
             print (Fore.RED + "No message decoded." + Style.RESET_ALL)
         else:
             print (Style.BRIGHT + Fore.GREEN + msg + Style.RESET_ALL)
         print (Style.BRIGHT + Fore.BLUE + "DONE!" + Style.RESET_ALL)
         typ, til = self.next_cycle()
-        timeout = til-5
+        timeout = til-2
         self.tx_msg = self.timed_input(timeout)
         if self.tx_msg:
-            self.tx_msg += " "*(80-(len(self.tx_msg)%80))
+            self.tx_msg += " "*(self.tx_length-(len(self.tx_msg)%self.tx_length))
+            self.tx_msg = self.rs.encode(self.tx_msg)
             self.tx_signal = self.pfsk.encode(self.tx_msg)
-            self.tx_signal *= (2147483647/self.tx_signal.max())
-            self.tx_signal = self.tx_signal.astype(np.int32)
+            self.tx_signal = self.tx_signal.astype(np.float32)
             wavfile.write('lol2.wav', 44100, self.tx_signal)
             self.tx_signal = self.tx_signal.tostring()
 
     def timed_input(self, timeout):
-        sys.stdout.write("Please input a message to transmit next cycle:\n")
+        sys.stdout.write("Please input a message to transmit next cycle (%.2fs):\n" % timeout)
         i, o, e = select.select( [sys.stdin], [], [], timeout )
         if i:
-            i = sys.stdin.readline().strip()[:80]
+            i = sys.stdin.readline().strip()[:self.tx_length]
         if not i:
             print (Fore.RED + "No message input, not transmitting next cycle..." + Style.RESET_ALL)
         return i
 
     def encode(self):
+        if self.options['fec']:
+            rs = reedsolo.RSCodec(len(self.options['msg']))
+            self.options['msg'] = rs.encode(self.options['msg'])
         print Style.BRIGHT + "Encoding..." + Style.RESET_ALL
         t = time.time()
         signal = self.pfsk.encode(self.options['msg'])
-        signal *= (2147483647/signal.max())
         print (Style.BRIGHT + "Done! (%.2f seconds)" + Style.RESET_ALL) % (time.time()-t)
         print Style.BRIGHT + "Writing..." + Style.RESET_ALL
         wavfile.write(self.options['file'], pfsk.SAMPLERATE, signal.astype(np.int32))
@@ -132,7 +141,12 @@ class Schmetterling:
         _, signal = wavfile.read(self.options['file'])
         print Style.BRIGHT + "Decoding..." + Style.RESET_ALL
         t = time.time()
-        print (Style.BRIGHT + Fore.BLUE + "Message: " + Fore.GREEN + "%s" + Style.RESET_ALL) % self.pfsk.decode(signal)
+        msg = self.pfsk.decode(signal)
+        if self.options['fec']:
+            print 'doing fec'
+            rs = reedsolo.RSCodec(len(msg)/2)
+            msg = rs.decode(msg)
+        print (Style.BRIGHT + Fore.BLUE + "Message: " + Fore.GREEN + "%s" + Style.RESET_ALL) % msg
         print (Style.BRIGHT + "Done! (%.2f seconds)" + Style.RESET_ALL) % (time.time()-t)
 
     def healthcheck(self):
@@ -157,7 +171,7 @@ class Schmetterling:
             sys.exit(1)
 
     def interactive_config(self, option):
-        if option in ['encode_wav', 'decode_wav', 'file']: return
+        if option in ['encode_wav', 'decode_wav', 'file', 'fec']: return
         if option == 'interval':
             options = ('odd', 'even')
             choice = raw_input(Style.BRIGHT + 'Please choose an interval (' + Fore.GREEN + 'odd' + Fore.RESET + '/' + Fore.GREEN + 'even' + Fore.RESET +'): ' + Style.RESET_ALL).lower()

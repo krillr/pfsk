@@ -14,17 +14,14 @@ class Interface:
     def set_recording_device(self, index):
         self.recording_device = index
     def play(self, signal_string):
-        stream = self.pa.open(format=pyaudio.paInt32, channels=1, rate=self.samplerate, output=True, output_device_index=self.playback_device)
+        stream = self.pa.open(format=pyaudio.paFloat32, channels=1, rate=self.samplerate, output=True, output_device_index=self.playback_device)
         stream.write(signal_string)
         stream.close()
     def record(self, seconds=12):
-        stream = self.pa.open(format=pyaudio.paInt32, channels=1, rate=self.samplerate, input=True, output=False, input_device_index=self.recording_device)
-        import time
-        t = time.time()
+        stream = self.pa.open(format=pyaudio.paFloat32, channels=1, rate=self.samplerate, input=True, output=False, input_device_index=self.recording_device)
         data = stream.read(seconds*self.samplerate)
-        print time.time()-t
         stream.close()
-        signal = numpy.fromstring(data, dtype=numpy.int32)
+        signal = numpy.fromstring(data, dtype=numpy.float32)
         return signal
 
 if __name__ == '__main__':

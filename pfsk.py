@@ -2,7 +2,7 @@ import bitarray
 import numpy as np
 import util
 
-FRAMELENGTH = 0.25
+FRAMELENGTH = 0.5
 TONESPACING = 4
 SAMPLERATE  = 44100.0
 CHUNK_LENGTH = int(SAMPLERATE * FRAMELENGTH)
@@ -11,7 +11,7 @@ MAXIMUM_PHASE = util.TAU
 EXPECTED = bitarray.bitarray('01001011010100100011000101001100010011000101001000100000010000110100111000111000001101010010000000101101001100010011000000110000')
 
 class Modem:
-    def __init__(self, carrier=1000, channelcount=4, tonecount=4, phasecount=4):
+    def __init__(self, carrier=1000, channelcount=4, tonecount=4, phasecount=1):
         self.carrier = carrier
         self.channelcount = channelcount
         self.tonecount = tonecount
@@ -23,7 +23,7 @@ class Modem:
         self.channelbitwidth = util.getPower(tonecount * phasecount)
         self.bitrate = channelcount * self.channelbitwidth
 
-        self.bandwidth = (channelcount+1) * tonecount * TONESPACING + TONESPACING
+        self.bandwidth = (channelcount+1) * tonecount * TONESPACING + (TONESPACING*2)
 
         # magic to create a list of all the possible symbol values
         self.symbolvalues = [
@@ -43,7 +43,7 @@ class Modem:
         """
         creates the channels, including their boundaries and symbols
         """
-        lowerbound = carrier - ((self.channelcount/2)* self.channelwidth)
+        lowerbound = carrier - ((self.channelcount/2) * self.channelwidth)
         upperbound = carrier + ((self.channelcount/2) * self.channelwidth)
 
         channels, symbols2bin, bin2symbols = {}, {}, {}
@@ -100,7 +100,6 @@ class Modem:
                 else:
                     framesignal += waveform
                 frame.append(symbol)
-            print frame
             signal = np.append(signal, framesignal)
         signal += util.note(self.carrier, 0, len(signal)/SAMPLERATE)
         return signal
@@ -118,16 +117,16 @@ class Modem:
                                                   signalcarrier + TONESPACING/2)
             if not chunkcarrier: continue
             chunkphase = chunkanalysis.get_phase(chunkcarrier)
-            print chunkphase
+            print chunkcarrier, chunkphase
 
             channels, symbols2bin, bin2symbols = self.mkchannels(int(chunkcarrier), chunkphase)
             tones = set([x[0] for x in symbols2bin])
             angles = set([x[1] for x in symbols2bin])
-            frame = []
             for channel in sorted(channels):
                 expected = EXPECTED[c*self.channelbitwidth:c*self.channelbitwidth+self.channelbitwidth]
                 expected += [0]*(self.channelbitwidth - len(expected))
                 peaks = chunkanalysis.find_peaks_with_angles(*channel)
+                print peaks
                 scores = []
                 for peak in peaks:
                     score = peak[1]
@@ -147,18 +146,16 @@ class Modem:
                     possibilities = [(x, abs(x-tone)) for x in tones]
                     possibilities.sort(key=lambda x:x[1])
                     tone = possibilities[0][0]
-                frame.append((tone, chunkanalysis.get_phase(tone)))
                 bits += symbols2bin[(tone, angle)]
                 c += 1
-            print frame
         return bytearray(bits.tobytes())
 
 if __name__ == '__main__':
     from scipy.io import wavfile
     import reedsolo, sys, scipy.stats
     
-    input = "testing 123         "
-    #rs = reedsolo.RSCodec(len(input))
+    input = "KR1LLR CN85 -100"
+    rs = reedsolo.RSCodec(len(input))
 
     modem = Modem()
 
@@ -168,7 +165,7 @@ if __name__ == '__main__':
     print "Channel Bitwidth:", modem.channelbitwidth
 
     if sys.argv[1] == 'encode':
-        #input = rs.encode(input)
+        input = rs.encode(input)
         signal = modem.encode(input)
         wavfile.write(sys.argv[2], SAMPLERATE,  signal.astype(np.float32))
     elif sys.argv[1] == 'decode':
