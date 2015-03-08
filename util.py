@@ -1,6 +1,10 @@
-import numpy as np, math
+import numpy as np, math, time
+from numpy.fft import fft as FFT_FUNC
 
 TAU = np.pi * 2
+
+def isEven(num):
+    return num % 2 == 0
 
 def getPower (num, base=2):
     if base == 1 and num != 1: return False
@@ -37,12 +41,11 @@ class SignalAnalyzer:
         self.freqs = None
         self.processed = False
     def process(self):
-        self.fft    = np.fft.fft(self.signal)
+        self.fft    = FFT_FUNC(self.signal)#, planner_effort='FFTW_ESTIMATE')
         self.amps   = np.abs(self.fft)
-        self.amps  /= self.amps.max()
         self.freqs  = np.around(np.fft.fftfreq(len(self.fft), 1.0/(self.samplerate)))
+        self.freq_indices = np.indices(self.freqs.shape)
         self.angles = np.angle(self.fft) % TAU
-        self.angle_lookup = dict(zip(self.freqs, self.angles))
         self.processed  = True
     def find_peak(self, minfreq=250, maxfreq=2500):
         peaks = self.find_peaks(minfreq, maxfreq)
@@ -51,8 +54,7 @@ class SignalAnalyzer:
         return peak[0]
     def find_peaks(self, minfreq=250, maxfreq=2500):
         if not self.processed: self.process()
-        y = np.indices(self.freqs.shape)
-        locs = y[:, (self.freqs >= minfreq) & (self.freqs <= maxfreq)]
+        locs = self.freq_indices[:, (self.freqs >= minfreq) & (self.freqs <= maxfreq)]
         freqs = self.freqs[locs][0]
         amps = self.amps[locs][0]
         amps /= amps.max()
@@ -67,7 +69,8 @@ class SignalAnalyzer:
         peak = self.find_peak(minfreq, maxfreq)
         return peak, self.get_phase(peak)
     def get_phase(self, frequency):
-        if frequency in self.angle_lookup: return self.angle_lookup[frequency]
+        i = self.freq_indices[:, (self.freqs == frequency)]
+        return self.angles[i][0][0]
 
 if __name__ == '__main__':
     from scipy.io import wavfile
