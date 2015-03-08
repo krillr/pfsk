@@ -8,7 +8,7 @@ class Interface:
         self.samplerate = samplerate
     def get_devices(self):
         for i in range(self.pa.get_device_count()):
-            yield i, self.pa.get_device_info_by_index(i)
+            yield self.pa.get_device_info_by_index(i)
     def set_playback_device(self, index):
         self.playback_device = index
     def set_recording_device(self, index):
@@ -28,3 +28,6 @@ if __name__ == '__main__':
     audio = Interface()
     for index, data in audio.get_devices():
         print index, data
+
+# vim: ai ts=4 sts=4 et sw=4 ft=python
+# vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=python
