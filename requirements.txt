@@ -4,3 +4,4 @@ scipy
 reedsolo
 bitarray
 pyaudio
+ntplib

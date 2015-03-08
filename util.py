@@ -15,7 +15,8 @@ def getPower (num, base=2):
 
 def note(freq, phase=0, length=0.25, samplerate=44100):
     t = np.linspace(0, length, length * samplerate)
-    data = np.cos((TAU * freq * t) + (phase % 6.28))
+    data = np.cos((TAU * freq * t) + (phase % 6.28)) * 12750
+    data /= data.max()
     return envelope(data, 1)
 
 def envelope (samples, channels):
@@ -34,7 +35,7 @@ def envelope (samples, channels):
 
 class SignalAnalyzer:
     def __init__(self, signal, samplerate):
-        self.signal = signal / signal.max()
+        self.signal = signal
         self.samplerate = samplerate
         self.fft = None
         self.amplitudes = None
@@ -75,7 +76,13 @@ class SignalAnalyzer:
 if __name__ == '__main__':
     from scipy.io import wavfile
     import sys
-    wavfile.write(sys.argv[1], 44100, note(500, 0))
+    signal = note(500, 0, 5)
+    signal /= signal.max()
+    signal *= 2147483647
+    signal = signal.astype(np.int32)
+    wavfile.write(sys.argv[1], 44100, signal)
+    _, signal2 = wavfile.read(sys.argv[1])
+    print (signal == signal2).all()
 
 # vim: ai ts=4 sts=4 et sw=4 ft=python
 # # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=python

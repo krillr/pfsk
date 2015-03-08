@@ -1,6 +1,6 @@
 from colorama import init, Fore, Back, Style
 from scipy.io import wavfile
-import audio, argparse, json, os, pfsk, select, sys, time, warnings
+import audio, argparse, json, ntplib, numpy as np, os, pfsk, select, sys, time, util, warnings
 
 warnings.simplefilter('ignore')
 
@@ -18,6 +18,12 @@ class Schmetterling:
         self.options = dict(Schmetterling.options.parse_args()._get_kwargs())
         self.audio = audio.Interface()
         self.pfsk = pfsk.Modem()
+        self.ntpclient = ntplib.NTPClient()
+        self.timeoffset = self.ntpclient.request('time.nist.gov', version=3).offset
+        self.tx_msg = ''
+
+    def time(self):
+        return time.time() + self.timeoffset
 
     def run(self):
         if self.options['encode_wav'] or self.options['decode_wav']:
@@ -37,17 +43,89 @@ class Schmetterling:
         missing = [x for x, y in self.options.items() if y == None]
         for x in missing:
             self.options[x] = self.interactive_config(x)
+            print self.options[x]
             print Style.RESET_ALL + '\n'
         self.audio.set_playback_device(self.options['playback_device'])
         self.audio.set_recording_device(self.options['recording_device'])
+
+        self.run_client()
+
+    def next_cycle(self):
+        t = self.time()
+        d = 30-(t % 30)
+        n = int(t + d)
+        typ = 'rx'
+        even = util.isEven(int(t+d)/2)
+        if even and self.options['interval'] == 'even' \
+        or not even and self.options['interval'] == 'odd':
+            typ = 'tx'
+        return typ, d
+
+    def run_client(self):
+        typ, til = self.next_cycle()
+        if typ == 'tx':
+            til += 30
+            typ = 'rx'
+        print (Style.BRIGHT + 'Waiting until next rx cycle (%.2fs)' + Style.RESET_ALL) % til
+        time.sleep(til)
+        while 1:
+            if typ == 'tx':
+                self.do_tx()
+            else:
+                self.do_rx()
+            typ, til = self.next_cycle()
+            print typ, til
+            print (Style.BRIGHT + "Sleeping until the prophecy is fulfilled (%.2fs)" + Style.RESET_ALL) % til
+            time.sleep(til)
+
+    def do_tx(self):
+        if not self.tx_msg:
+            print (Fore.RED + 'Nothing to TX, waiting until RX cycle' + Style.RESET_ALL)
+            return
+        print (Style.BRIGHT + Fore.BLUE + "Transmitting" + Style.RESET_ALL)
+        self.audio.play(self.tx_signal)
+        print (Style.BRIGHT + Fore.BLUE + "DONE!" + Style.RESET_ALL)
+
+        
+    def do_rx(self):
+        print (Style.BRIGHT + Fore.BLUE + "Receiving" + Style.RESET_ALL)
+        signal = self.audio.record(10)
+        wavfile.write('lol.wav', 44100, signal)
+        print (Style.BRIGHT + Fore.BLUE + "Decoding" + Style.RESET_ALL)
+        msg = self.pfsk.decode(signal)
+        if not msg:
+            print (Fore.RED + "No message decoded." + Style.RESET_ALL)
+        else:
+            print (Style.BRIGHT + Fore.GREEN + msg + Style.RESET_ALL)
+        print (Style.BRIGHT + Fore.BLUE + "DONE!" + Style.RESET_ALL)
+        typ, til = self.next_cycle()
+        timeout = til-5
+        self.tx_msg = self.timed_input(timeout)
+        if self.tx_msg:
+            self.tx_msg += " "*(80-(len(self.tx_msg)%80))
+            self.tx_signal = self.pfsk.encode(self.tx_msg)
+            self.tx_signal *= (2147483647/self.tx_signal.max())
+            self.tx_signal = self.tx_signal.astype(np.int32)
+            wavfile.write('lol2.wav', 44100, self.tx_signal)
+            self.tx_signal = self.tx_signal.tostring()
+
+    def timed_input(self, timeout):
+        sys.stdout.write("Please input a message to transmit next cycle:\n")
+        i, o, e = select.select( [sys.stdin], [], [], timeout )
+        if i:
+            i = sys.stdin.readline().strip()[:80]
+        if not i:
+            print (Fore.RED + "No message input, not transmitting next cycle..." + Style.RESET_ALL)
+        return i
 
     def encode(self):
         print Style.BRIGHT + "Encoding..." + Style.RESET_ALL
         t = time.time()
         signal = self.pfsk.encode(self.options['msg'])
+        signal *= (2147483647/signal.max())
         print (Style.BRIGHT + "Done! (%.2f seconds)" + Style.RESET_ALL) % (time.time()-t)
         print Style.BRIGHT + "Writing..." + Style.RESET_ALL
-        wavfile.write(self.options['file'], pfsk.SAMPLERATE, signal)
+        wavfile.write(self.options['file'], pfsk.SAMPLERATE, signal.astype(np.int32))
 
     def decode(self):
         print Style.BRIGHT + "Reading..." + Style.RESET_ALL
